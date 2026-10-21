@@ -91,7 +91,98 @@ public class ModbusTcpMaster implements AutoCloseable{
         }
     }
 
+    /** Read Holding Registers (FC 0x03) */
+    public int[] readHoldingRegisters(int startAddress, int quantity) throws IOException {
+        byte functionCode = 0x03;
+        byte[] pdu = buildReadRequestPdu(functionCode, startAddress, quantity);
+        byte[] response = sendAndReceive(pdu);
+        return parseRegistersResponse(response, quantity);
+    }
+
+    /** Read Input Registers (FC 0x04) */
+    public int[] readInputRegisters(int startAddress, int quantity) throws IOException {
+        byte functionCode = 0x04;
+        byte[] pdu = buildReadRequestPdu(functionCode, startAddress, quantity);
+        byte[] response = sendAndReceive(pdu);
+        return parseRegistersResponse(response, quantity);
+    }
+
+    /** Write Single Register (FC 0x06) */
+    public void writeSingleRegister(int address, int value) throws IOException {
+        byte functionCode = 0x06;
+        byte[] pdu = new byte[5];
+        pdu[0] = functionCode;
+        pdu[1] = (byte) ((address >> 8) & 0xFF);
+        pdu[2] = (byte) (address & 0xFF);
+        pdu[3] = (byte) ((value >> 8) & 0xFF);
+        pdu[4] = (byte) (value & 0xFF);
+
+        byte[] response = sendAndReceive(pdu);
+        if (response.length < 5 || response[0] != functionCode) {
+            throw new IOException("Invalid response for Write Single Register");
+        }
+    }
+
+    /** Write Multiple Registers (FC 0x10) */
+    public void writeMultipleRegisters(int startAddress, int[] values) throws IOException {
+        byte functionCode = 0x10;
+        int quantity = values.length;
+
+        byte byteCount = (byte) (quantity * 2);
+        byte[] pdu = new byte[6 + byteCount];
+
+        pdu[0] = functionCode;
+        pdu[1] = (byte) ((startAddress >> 8) & 0xFF);
+        pdu[2] = (byte) (startAddress & 0xFF);
+        pdu[3] = (byte) ((quantity >> 8) & 0xFF);
+        pdu[4] = (byte) (quantity & 0xFF);
+        pdu[5] = byteCount;
+
+        int pos = 6;
+        for (int v : values) {
+            pdu[pos++] = (byte) ((v >> 8) & 0xFF);
+            pdu[pos++] = (byte) (v & 0xFF);
+        }
+
+        byte[] response = sendAndReceive(pdu);
+        if (response.length < 5 || response[0] != functionCode) {
+            throw new IOException("Invalid response for Write Multiple Registers");
+        }
+    }
+
+
+
+
+
+
+
     // ---------- Внутренняя логика ----------
+
+    // Парсер ответа для регистров
+    private int[] parseRegistersResponse(byte[] pdu, int quantity) throws IOException {
+        if (pdu.length < 2) {
+            throw new IOException("Invalid registers response length");
+        }
+
+        byte functionCode = pdu[0];
+        int byteCount = pdu[1] & 0xFF;
+
+        if (byteCount != quantity * 2) {
+            throw new IOException("Unexpected byte count in response");
+        }
+
+        int[] result = new int[quantity];
+        int pos = 2;
+
+        for (int i = 0; i < quantity; i++) {
+            int hi = pdu[pos++] & 0xFF;
+            int lo = pdu[pos++] & 0xFF;
+            result[i] = (hi << 8) | lo;
+        }
+
+        return result;
+    }
+
 
     private byte[] buildReadRequestPdu(byte functionCode, int startAddress, int quantity) {
         byte[] pdu = new byte[5];
